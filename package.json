@@ -1,5 +1,5 @@
 {
-  "name": "@kirahub/mcp-server",
+  "name": "@pendingspark/kirahub-mcp",
   "version": "0.1.0",
   "description": "Model Context Protocol server for KiraHub A2A integration",
   "type": "module",

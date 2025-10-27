@@ -71,16 +71,21 @@ complete_task(message="Refresh token rotation is implemented with a 7-day rotati
 
 ## Installation
 
-1. **Install dependencies:**
-   ```bash
-   cd mcp-server
-   npm install
-   ```
+The KiraHub MCP server is available as an npm package and can be used directly with `npx`:
 
-2. **Build the server:**
-   ```bash
-   npm run build
-   ```
+```bash
+# No installation needed! Use with npx:
+npx -y @pendingspark/kirahub-mcp@latest
+
+# Or install globally:
+npm install -g @pendingspark/kirahub-mcp
+
+# Or install locally for development:
+git clone https://github.com/PendingSpark/kirahub-mcp.git
+cd kirahub-mcp
+npm install
+npm run build
+```
 
 ## Getting Your API Key
 
@@ -116,19 +121,11 @@ complete_task(message="Refresh token rotation is implemented with a 7-day rotati
 
 Follow these steps to integrate KiraHub with Claude Code:
 
-#### Step 1: Build the MCP Server
+#### Step 1: Get Your API Key
 
-```bash
-cd mcp-server
-npm install
-npm run build
-```
+Use the Dashboard (Option 1 above) to create an API key.
 
-#### Step 2: Get Your API Key
-
-Use the Dashboard (Option 1 above) or CLI (Option 2 above) to create an API key.
-
-#### Step 3: Configure Claude Code
+#### Step 2: Configure Claude Code
 
 1. **Find your Claude Code config directory:**
    - macOS: `~/Library/Application Support/Claude/`
@@ -141,9 +138,10 @@ Use the Dashboard (Option 1 above) or CLI (Option 2 above) to create an API key.
    {
      "mcpServers": {
        "kirahub": {
-         "command": "node",
+         "command": "npx",
          "args": [
-           "/absolute/path/to/kirahub/mcp-server/dist/index.js"
+           "-y",
+           "@pendingspark/kirahub-mcp@latest"
          ],
          "env": {
            "KIRAHUB_API_URL": "http://localhost",
@@ -155,13 +153,13 @@ Use the Dashboard (Option 1 above) or CLI (Option 2 above) to create an API key.
    ```
 
    **Important:**
-   - Replace `/absolute/path/to/kirahub` with your actual path
    - Replace `kh_live_your-api-key-here` with the API key you generated
    - The API key starts with `kh_live_`
+   - The `@latest` tag ensures you always get the newest version
 
 3. **Restart Claude Code** to load the MCP server
 
-#### Step 4: Verify Setup
+#### Step 3: Verify Setup
 
 In Claude Code, try:
 ```
@@ -178,24 +176,26 @@ Place `.mcp.json` in your project root. This keeps MCP config with your project.
 #### Option B: Global Config
 Place `.mcp.json` in Claude's config directory. This makes the MCP server available in all projects.
 
-#### Option C: Environment Variables
-Use a `.env` file in `mcp-server/` directory and omit the `env` section:
+#### Option C: Using Specific Version
+
+For production or to pin to a specific version:
 
 ```json
 {
   "mcpServers": {
     "kirahub": {
-      "command": "node",
-      "args": ["/absolute/path/to/kirahub/mcp-server/dist/index.js"]
+      "command": "npx",
+      "args": [
+        "-y",
+        "@pendingspark/kirahub-mcp@0.1.0"
+      ],
+      "env": {
+        "KIRAHUB_API_URL": "http://localhost",
+        "KIRAHUB_API_KEY": "kh_live_your-api-key-here"
+      }
     }
   }
 }
-```
-
-Then create `mcp-server/.env`:
-```env
-KIRAHUB_API_URL=http://localhost
-KIRAHUB_API_KEY=kh_live_your-api-key-here
 ```
 
 ## Plan Wiki Integration Setup
@@ -226,9 +226,10 @@ Update your `.mcp.json` to include the `PLAN_EDITOR_API_URL` environment variabl
 {
   "mcpServers": {
     "kirahub": {
-      "command": "node",
+      "command": "npx",
       "args": [
-        "/absolute/path/to/kirahub/mcp-server/dist/index.js"
+        "-y",
+        "@pendingspark/kirahub-mcp@latest"
       ],
       "env": {
         "KIRAHUB_API_URL": "http://localhost",
@@ -292,9 +293,10 @@ Replace the API key in your `.mcp.json` with the newly created project-scoped ke
 {
   "mcpServers": {
     "kirahub": {
-      "command": "node",
+      "command": "npx",
       "args": [
-        "/absolute/path/to/kirahub/mcp-server/dist/index.js"
+        "-y",
+        "@pendingspark/kirahub-mcp@latest"
       ],
       "env": {
         "KIRAHUB_API_URL": "http://localhost",
@@ -786,14 +788,25 @@ npm run dev
 ```
 
 ### Test Locally
+
+**Option 1: Using npx (Quick Test)**
 ```bash
 # Make sure KiraHub is running
-cd ../
-make up
+KIRAHUB_API_URL=http://localhost \
+KIRAHUB_API_KEY=your-api-key \
+npx -y @pendingspark/kirahub-mcp@latest
+```
 
-# In another terminal, test the MCP server
-cd mcp-server
-KIRAHUB_API_URL=http://localhost:3000 \
+**Option 2: Local Development**
+```bash
+# Clone and build from source
+git clone https://github.com/PendingSpark/kirahub-mcp.git
+cd kirahub-mcp
+npm install
+npm run build
+
+# Test the local build
+KIRAHUB_API_URL=http://localhost \
 KIRAHUB_API_KEY=your-api-key \
 node dist/index.js
 ```
@@ -842,9 +855,9 @@ The server translates MCP tool calls into A2A protocol messages, sends them to K
 
 ## Related Documentation
 
-- [A2A Protocol](../docs/A2A_VALIDATION_CONVERSATION.md)
-- [A2A Response Parsing](../docs/A2A_RESPONSE_PARSING.md)
-- [KiraHub README](../README.md)
+- [KiraHub Main Repository](https://github.com/PendingSpark/kirahub)
+- [A2A Protocol Documentation](https://github.com/PendingSpark/kirahub/blob/main/docs/A2A_VALIDATION_CONVERSATION.md)
+- [Agent Integration Guide](https://github.com/PendingSpark/kirahub/blob/main/docs/AGENT_INTEGRATION.md)
 
 ## License
 
