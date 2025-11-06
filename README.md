@@ -858,7 +858,3 @@ The server translates MCP tool calls into A2A protocol messages, sends them to K
 - [KiraHub Main Repository](https://github.com/PendingSpark/kirahub)
 - [A2A Protocol Documentation](https://github.com/PendingSpark/kirahub/blob/main/docs/A2A_VALIDATION_CONVERSATION.md)
 - [Agent Integration Guide](https://github.com/PendingSpark/kirahub/blob/main/docs/AGENT_INTEGRATION.md)
-
-## License
-
-MIT
