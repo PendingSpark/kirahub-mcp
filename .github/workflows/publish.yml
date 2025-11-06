@@ -42,9 +42,9 @@ jobs:
         run: |
           CURRENT_VERSION=$(node -p "require('./package.json').version")
           if git rev-parse "v$CURRENT_VERSION" >/dev/null 2>&1; then
-            echo "needs_bump=true" >> $GITHUB_OUTPUT
-          else
             echo "needs_bump=false" >> $GITHUB_OUTPUT
+          else
+            echo "needs_bump=true" >> $GITHUB_OUTPUT
           fi
           echo "current_version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
 
@@ -65,11 +65,13 @@ jobs:
           git push origin develop --follow-tags
 
       - name: Publish to GitHub Packages
+        if: steps.check_version.outputs.needs_bump == 'true'
         run: npm publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create GitHub Release
+        if: steps.check_version.outputs.needs_bump == 'true'
         uses: actions/create-release@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
