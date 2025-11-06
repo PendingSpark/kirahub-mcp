@@ -36,12 +36,30 @@ jobs:
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
 
+      - name: Check if version needs bumping
+        id: check_version
+        run: |
+          CURRENT_VERSION=$(node -p "require('./package.json').version")
+          if git rev-parse "v$CURRENT_VERSION" >/dev/null 2>&1; then
+            echo "needs_bump=true" >> $GITHUB_OUTPUT
+          else
+            echo "needs_bump=false" >> $GITHUB_OUTPUT
+          fi
+          echo "current_version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+
       - name: Bump version
+        if: steps.check_version.outputs.needs_bump == 'true'
         run: |
           npm version patch -m "chore: bump version to %s [skip ci]"
           echo "NEW_VERSION=$(node -p "require('./package.json').version")" >> $GITHUB_ENV
 
+      - name: Set version for existing tag
+        if: steps.check_version.outputs.needs_bump == 'false'
+        run: |
+          echo "NEW_VERSION=${{ steps.check_version.outputs.current_version }}" >> $GITHUB_ENV
+
       - name: Push changes
+        if: steps.check_version.outputs.needs_bump == 'true'
         run: |
           git push origin develop --follow-tags
 
