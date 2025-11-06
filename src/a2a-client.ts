@@ -102,14 +102,21 @@ export class A2AClient {
    * Extract validation question from A2A response
    */
   extractValidationQuestion(response: A2AResponse): ValidationData | null {
-    if (!response.result?.parts) return null;
+    if (!response.result?.parts) {
+      console.error('[A2AClient] extractValidationQuestion: No result.parts in response');
+      return null;
+    }
 
+    console.error('[A2AClient] extractValidationQuestion: Checking', response.result.parts.length, 'parts');
     for (const part of response.result.parts) {
+      console.error('[A2AClient] Part kind:', part.kind, 'data.kind:', part.data?.kind);
       if (part.kind === 'data' && part.data?.kind === 'validation') {
+        console.error('[A2AClient] Found validation question:', part.data);
         return part.data as ValidationData;
       }
     }
 
+    console.error('[A2AClient] No validation question found');
     return null;
   }
 
@@ -117,14 +124,21 @@ export class A2AClient {
    * Extract validation result from A2A response
    */
   extractValidationResult(response: A2AResponse): ValidationResult | null {
-    if (!response.result?.parts) return null;
+    if (!response.result?.parts) {
+      console.error('[A2AClient] extractValidationResult: No result.parts in response');
+      return null;
+    }
 
+    console.error('[A2AClient] extractValidationResult: Checking', response.result.parts.length, 'parts');
     for (const part of response.result.parts) {
+      console.error('[A2AClient] Part kind:', part.kind, 'has validationResult:', !!part.data?.validationResult);
       if (part.kind === 'data' && part.data?.validationResult) {
+        console.error('[A2AClient] Found validation result:', part.data);
         return part.data as ValidationResult;
       }
     }
 
+    console.error('[A2AClient] No validation result found');
     return null;
   }
 
@@ -132,13 +146,18 @@ export class A2AClient {
    * Extract text from A2A response
    */
   extractText(response: A2AResponse): string {
-    if (!response.result?.parts) return '';
+    if (!response.result?.parts) {
+      console.error('[A2AClient] extractText: No result.parts in response');
+      return '';
+    }
 
+    console.error('[A2AClient] extractText: Extracting from', response.result.parts.length, 'parts');
     const textParts = response.result.parts
       .filter(part => part.kind === 'text')
       .map(part => part.text || '')
       .filter(text => text.length > 0);
 
+    console.error('[A2AClient] extractText: Found', textParts.length, 'text parts');
     return textParts.join('\n\n');
   }
 
