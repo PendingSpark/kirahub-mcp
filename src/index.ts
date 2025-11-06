@@ -595,16 +595,30 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           message?: string;
         };
 
-        // If message provided, this is an answer to a validation question
-        const requestMessage = message
-          ? message
-          : task_id
-          ? `Mark task ${task_id} as completed`
-          : 'Mark current task as completed';
+        // Build the request message based on what parameters are provided
+        let requestMessage: string;
+        if (task_id && message) {
+          // Completing a task with a completion message
+          requestMessage = `Mark task ${task_id} as completed with message: ${message}`;
+        } else if (message && !task_id) {
+          // Answering a validation question (no task_id means we're in validation flow)
+          requestMessage = message;
+        } else if (task_id && !message) {
+          // Completing a task without a message
+          requestMessage = `Mark task ${task_id} as completed`;
+        } else {
+          // No parameters - complete current task
+          requestMessage = 'Mark current task as completed';
+        }
 
+        console.error(`[complete_task] Sending request: ${requestMessage}`);
         const response = await a2aClient.sendMessage(requestMessage);
 
+        // Log full response structure for debugging
+        console.error('[complete_task] Full A2A response:', JSON.stringify(response, null, 2));
+
         if (a2aClient.hasError(response)) {
+          console.error('[complete_task] Error detected in response');
           return {
             content: [
               { type: 'text', text: a2aClient.getErrorMessage(response) },
@@ -616,6 +630,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         // Check for validation question
         const validationQuestion = a2aClient.extractValidationQuestion(response);
         if (validationQuestion) {
+          console.error('[complete_task] Validation question detected:', validationQuestion);
           const text = a2aClient.extractText(response);
           return {
             content: [
@@ -630,6 +645,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         // Check for validation result
         const validationResult = a2aClient.extractValidationResult(response);
         if (validationResult) {
+          console.error('[complete_task] Validation result detected:', validationResult);
           const text = a2aClient.extractText(response);
           return {
             content: [
@@ -641,9 +657,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           };
         }
 
-        // Normal response
+        // Normal response - log what we're returning
+        const normalText = a2aClient.extractText(response);
+        console.error('[complete_task] Normal response (no validation):', normalText);
+
         return {
-          content: [{ type: 'text', text: a2aClient.extractText(response) }],
+          content: [{ type: 'text', text: normalText }],
         };
       }
 
