@@ -767,11 +767,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const responseText = a2aClient.extractText(response);
 
         // Try to post "started" activity (best effort - don't fail if this fails)
+        let projectId: string | null = null;
         try {
           // Extract project ID from response if available
           const projectMatch = responseText.match(/project[:\s]+([a-f0-9-]{36})/i);
           if (projectMatch) {
-            currentProjectId = projectMatch[1];
+            projectId = projectMatch[1];
+            currentProjectId = projectId;
             await activityClient.postActivity({
               projectId: currentProjectId,
               taskId: task_id,
@@ -784,8 +786,61 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           console.error('[claim_task] Failed to auto-post activity (non-fatal):', activityError);
         }
 
+        // Fetch project context bundle (knowledge + shared context)
+        let contextBundle = '';
+        if (projectId) {
+          try {
+            // Fetch shared context
+            const context = await activityClient.getContext(projectId);
+            const hasContext = Object.values(context).some(
+              (cat) => Object.keys(cat).length > 0
+            );
+
+            if (hasContext) {
+              const contextLines: string[] = ['\n\n---\n## Project Shared Context'];
+              for (const cat of ['contracts', 'utilities', 'decisions', 'config'] as const) {
+                const items = context[cat] || {};
+                const keys = Object.keys(items);
+                if (keys.length > 0) {
+                  contextLines.push(`\n### ${cat.charAt(0).toUpperCase() + cat.slice(1)}`);
+                  for (const k of keys) {
+                    const value = items[k];
+                    contextLines.push(`- **${k}**: ${JSON.stringify(value)}`);
+                  }
+                }
+              }
+              contextBundle += contextLines.join('\n');
+            }
+
+            // Fetch project knowledge
+            const knowledgeResponse = await a2aClient.sendMessage(
+              `Search knowledge base for project ${projectId}`
+            );
+            if (!a2aClient.hasError(knowledgeResponse)) {
+              const knowledgeText = a2aClient.extractText(knowledgeResponse);
+              if (knowledgeText && !knowledgeText.includes('No knowledge')) {
+                contextBundle += '\n\n---\n## Project Knowledge\n' + knowledgeText;
+              }
+            }
+
+            // Fetch recent activity from other agents
+            const activities = await activityClient.getProjectActivity({
+              projectId,
+              limit: 5,
+            });
+            if (activities.length > 0) {
+              contextBundle += '\n\n---\n## Recent Activity';
+              for (const a of activities) {
+                contextBundle += `\n- [${a.eventType}] ${a.message}`;
+              }
+            }
+          } catch (contextError) {
+            console.error('[claim_task] Failed to fetch context bundle (non-fatal):', contextError);
+          }
+        }
+
         return {
-          content: [{ type: 'text', text: responseText }],
+          content: [{ type: 'text', text: responseText + contextBundle }],
         };
       }
 
@@ -965,8 +1020,66 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           };
         }
 
+        const responseText = a2aClient.extractText(response);
+
+        // Try to extract project ID and fetch context bundle
+        let contextBundle = '';
+        const projectMatch = responseText.match(/project[:\s]+([a-f0-9-]{36})/i);
+        const projectId = projectMatch ? projectMatch[1] : null;
+
+        if (projectId) {
+          try {
+            // Fetch shared context
+            const context = await activityClient.getContext(projectId);
+            const hasContext = Object.values(context).some(
+              (cat) => Object.keys(cat).length > 0
+            );
+
+            if (hasContext) {
+              const contextLines: string[] = ['\n\n---\n## Project Shared Context'];
+              for (const cat of ['contracts', 'utilities', 'decisions', 'config'] as const) {
+                const items = context[cat] || {};
+                const keys = Object.keys(items);
+                if (keys.length > 0) {
+                  contextLines.push(`\n### ${cat.charAt(0).toUpperCase() + cat.slice(1)}`);
+                  for (const k of keys) {
+                    const value = items[k];
+                    contextLines.push(`- **${k}**: ${JSON.stringify(value)}`);
+                  }
+                }
+              }
+              contextBundle += contextLines.join('\n');
+            }
+
+            // Fetch project knowledge
+            const knowledgeResponse = await a2aClient.sendMessage(
+              `Search knowledge base for project ${projectId}`
+            );
+            if (!a2aClient.hasError(knowledgeResponse)) {
+              const knowledgeText = a2aClient.extractText(knowledgeResponse);
+              if (knowledgeText && !knowledgeText.includes('No knowledge')) {
+                contextBundle += '\n\n---\n## Project Knowledge\n' + knowledgeText;
+              }
+            }
+
+            // Fetch recent activity
+            const activities = await activityClient.getProjectActivity({
+              projectId,
+              limit: 5,
+            });
+            if (activities.length > 0) {
+              contextBundle += '\n\n---\n## Recent Activity';
+              for (const a of activities) {
+                contextBundle += `\n- [${a.eventType}] ${a.message}`;
+              }
+            }
+          } catch (contextError) {
+            console.error('[get_task_details] Failed to fetch context bundle (non-fatal):', contextError);
+          }
+        }
+
         return {
-          content: [{ type: 'text', text: a2aClient.extractText(response) }],
+          content: [{ type: 'text', text: responseText + contextBundle }],
         };
       }
 
