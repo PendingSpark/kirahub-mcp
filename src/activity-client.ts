@@ -218,6 +218,19 @@ export class ActivityClient {
   }
 
   /**
+   * Get all context items created by a specific task
+   */
+  async getContextByTask(
+    projectId: string,
+    taskId: string
+  ): Promise<ContextItem[]> {
+    const response = await this.client.get(
+      `/projects/${projectId}/context/by-task/${taskId}`
+    );
+    return response.data.items;
+  }
+
+  /**
    * Perform bulk context operations
    */
   async bulkContextOperations(
