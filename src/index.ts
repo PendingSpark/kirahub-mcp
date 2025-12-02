@@ -476,13 +476,34 @@ const tools: Tool[] = [
         event_type: {
           type: 'string',
           enum: [
+            // Status Changes
             'started',
             'completed',
-            'file_modified',
-            'file_created',
-            'decision',
             'blocked',
+            'unblocked',
+            'progress',
+            // Code Changes
+            'file_created',
+            'file_modified',
+            'file_deleted',
+            'commit',
+            'pr_created',
+            'pr_merged',
+            // Code Artifacts
+            'type_created',
+            'type_modified',
+            'utility_created',
+            'api_created',
+            'api_modified',
+            // Build & Test
+            'test_run',
+            'build_run',
+            'lint_run',
+            'deploy',
+            // Decisions & Issues
+            'decision',
             'question',
+            'warning',
             'error',
           ],
           description: 'Type of activity event',
