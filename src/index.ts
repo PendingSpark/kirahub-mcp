@@ -25,6 +25,13 @@ const KIRAHUB_API_KEY = process.env.KIRAHUB_API_KEY;
 let currentTaskId: string | null = null;
 let currentProjectId: string | null = null;
 
+// Track context cleanup state
+let pendingContextCleanup: {
+  items: Array<{ category: string; key: string; value: any }>;
+  projectId: string;
+  taskId: string;
+} | null = null;
+
 if (!KIRAHUB_API_KEY) {
   console.error('Error: KIRAHUB_API_KEY environment variable is required');
   process.exit(1);
@@ -32,6 +39,139 @@ if (!KIRAHUB_API_KEY) {
 
 const a2aClient = new A2AClient(KIRAHUB_API_URL, KIRAHUB_API_KEY);
 const activityClient = new ActivityClient(KIRAHUB_API_URL, KIRAHUB_API_KEY);
+
+/**
+ * Check if there are context items created by this task that need cleanup review
+ */
+async function checkForContextCleanup(
+  projectId: string,
+  taskId: string
+): Promise<string | null> {
+  try {
+    const contextItems = await activityClient.getContextByTask(projectId, taskId);
+
+    if (contextItems.length === 0) {
+      console.error('[checkForContextCleanup] No context items found for task');
+      return null;
+    }
+
+    console.error(`[checkForContextCleanup] Found ${contextItems.length} context items for task ${taskId}`);
+
+    // Store for later processing
+    pendingContextCleanup = {
+      items: contextItems.map((item) => ({
+        category: item.category,
+        key: item.key,
+        value: item.value,
+      })),
+      projectId,
+      taskId,
+    };
+
+    // Build the prompt
+    const itemsList = contextItems
+      .map((item, index) => `${index + 1}. **${item.category}/${item.key}**: ${JSON.stringify(item.value).slice(0, 100)}${JSON.stringify(item.value).length > 100 ? '...' : ''}`)
+      .join('\n');
+
+    return `---
+## Context Cleanup
+
+This task created ${contextItems.length} shared context item(s):
+
+${itemsList}
+
+**Please review these items and decide which should be:**
+- **Kept** - Permanent project knowledge useful for future tasks
+- **Deleted** - Task-specific context no longer needed
+
+**To complete cleanup, call complete_task with a message in this format:**
+\`\`\`
+keep: 1, 2 (or "all" to keep everything)
+delete: 3 (or "all" to delete everything, or "none" to keep everything)
+\`\`\`
+
+Example: "keep: 1, 2 delete: 3" or "keep: all" or "delete: all"`;
+  } catch (error) {
+    console.error('[checkForContextCleanup] Error fetching context:', error);
+    return null;
+  }
+}
+
+/**
+ * Process the context cleanup response from the agent
+ */
+async function processContextCleanup(
+  message: string,
+  cleanup: {
+    items: Array<{ category: string; key: string; value: any }>;
+    projectId: string;
+    taskId: string;
+  }
+): Promise<string> {
+  const lowerMessage = message.toLowerCase();
+  const results: string[] = [];
+
+  // Parse the response
+  let itemsToDelete: number[] = [];
+  let itemsToKeep: number[] = [];
+
+  // Check for "delete: all" or "keep: all"
+  if (lowerMessage.includes('delete: all') || lowerMessage.includes('delete:all')) {
+    itemsToDelete = cleanup.items.map((_, i) => i + 1);
+  } else if (lowerMessage.includes('keep: all') || lowerMessage.includes('keep:all') || lowerMessage.includes('delete: none') || lowerMessage.includes('delete:none')) {
+    itemsToKeep = cleanup.items.map((_, i) => i + 1);
+  } else {
+    // Parse specific numbers
+    const keepMatch = lowerMessage.match(/keep:\s*([0-9,\s]+)/);
+    const deleteMatch = lowerMessage.match(/delete:\s*([0-9,\s]+)/);
+
+    if (keepMatch) {
+      itemsToKeep = keepMatch[1].split(',').map((n) => parseInt(n.trim())).filter((n) => !isNaN(n));
+    }
+    if (deleteMatch) {
+      itemsToDelete = deleteMatch[1].split(',').map((n) => parseInt(n.trim())).filter((n) => !isNaN(n));
+    }
+
+    // If only keep is specified, delete the rest
+    if (itemsToKeep.length > 0 && itemsToDelete.length === 0) {
+      const allIndices = cleanup.items.map((_, i) => i + 1);
+      itemsToDelete = allIndices.filter((i) => !itemsToKeep.includes(i));
+    }
+  }
+
+  console.error(`[processContextCleanup] Items to keep: ${itemsToKeep}, Items to delete: ${itemsToDelete}`);
+
+  // Delete the specified items
+  let deletedCount = 0;
+  for (const index of itemsToDelete) {
+    if (index >= 1 && index <= cleanup.items.length) {
+      const item = cleanup.items[index - 1];
+      try {
+        const deleted = await activityClient.deleteContext(
+          cleanup.projectId,
+          item.category as ContextCategory,
+          item.key
+        );
+        if (deleted) {
+          deletedCount++;
+          results.push(`Deleted: ${item.category}/${item.key}`);
+        }
+      } catch (error) {
+        console.error(`[processContextCleanup] Failed to delete ${item.category}/${item.key}:`, error);
+        results.push(`Failed to delete: ${item.category}/${item.key}`);
+      }
+    }
+  }
+
+  const keptCount = cleanup.items.length - deletedCount;
+
+  return `Context cleanup completed:
+- ${keptCount} item(s) kept as permanent project knowledge
+- ${deletedCount} item(s) deleted
+
+${results.length > 0 ? '\nDetails:\n' + results.join('\n') : ''}`
+    .trim();
+}
 
 const rawPlanEditorUrl =
   process.env.PLANCREATOR_API_URL ||
@@ -760,27 +900,28 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           };
         }
 
-        // Store current task for automatic activity tracking
-        currentTaskId = task_id;
+        // Extract task data from response to get the actual UUID
+        const taskData = a2aClient.extractTaskData(response);
+        const taskUuid = taskData?.id || task_id;
+        const projectId = taskData?.project_id || null;
+
+        // Store current task UUID for automatic activity tracking
+        currentTaskId = taskUuid;
+        currentProjectId = projectId;
 
         // Try to extract project ID from the response and auto-post activity
         const responseText = a2aClient.extractText(response);
 
         // Try to post "started" activity (best effort - don't fail if this fails)
-        let projectId: string | null = null;
         try {
-          // Extract project ID from response if available
-          const projectMatch = responseText.match(/project[:\s]+([a-f0-9-]{36})/i);
-          if (projectMatch) {
-            projectId = projectMatch[1];
-            currentProjectId = projectId;
+          if (currentProjectId) {
             await activityClient.postActivity({
               projectId: currentProjectId,
-              taskId: task_id,
+              taskId: taskUuid,
               eventType: 'started',
               message: 'Claimed and started working on task',
             });
-            console.error(`[claim_task] Auto-posted 'started' activity for task ${task_id}`);
+            console.error(`[claim_task] Auto-posted 'started' activity for task ${taskUuid}`);
           }
         } catch (activityError) {
           console.error('[claim_task] Failed to auto-post activity (non-fatal):', activityError);
@@ -850,6 +991,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           message?: string;
         };
 
+        // Check if we're in context cleanup flow
+        if (pendingContextCleanup && message) {
+          console.error('[complete_task] Processing context cleanup response');
+          const cleanupResult = await processContextCleanup(message, pendingContextCleanup);
+          pendingContextCleanup = null;
+          currentTaskId = null;
+          return {
+            content: [{ type: 'text', text: cleanupResult }],
+          };
+        }
+
         // Build the request message based on what parameters are provided
         let requestMessage: string;
         if (task_id && message) {
@@ -903,7 +1055,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           console.error('[complete_task] Validation result detected:', validationResult);
           const text = a2aClient.extractText(response);
 
-          // If validation passed, post completed activity
+          // If validation passed, post completed activity and check for context cleanup
           if (validationResult.validationResult === 'passed' && currentProjectId && currentTaskId) {
             try {
               await activityClient.postActivity({
@@ -913,11 +1065,25 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 message: `Task completed with validation score: ${validationResult.score}%`,
               });
               console.error(`[complete_task] Auto-posted 'completed' activity for task ${currentTaskId}`);
-              // Clear current task context
-              currentTaskId = null;
             } catch (activityError) {
               console.error('[complete_task] Failed to auto-post activity (non-fatal):', activityError);
             }
+
+            // Check for context items created by this task
+            const cleanupPrompt = await checkForContextCleanup(currentProjectId, currentTaskId);
+            if (cleanupPrompt) {
+              return {
+                content: [
+                  {
+                    type: 'text',
+                    text: `${text}\n\n**Validation ${validationResult.validationResult.toUpperCase()}** - Score: ${validationResult.score}%\n\n${cleanupPrompt}`,
+                  },
+                ],
+              };
+            }
+
+            // No context to clean up, clear task context
+            currentTaskId = null;
           }
 
           return {
@@ -945,11 +1111,20 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               message: 'Task completed',
             });
             console.error(`[complete_task] Auto-posted 'completed' activity for task ${taskIdToComplete}`);
-            // Clear current task context
-            currentTaskId = null;
           } catch (activityError) {
             console.error('[complete_task] Failed to auto-post activity (non-fatal):', activityError);
           }
+
+          // Check for context items created by this task
+          const cleanupPrompt = await checkForContextCleanup(currentProjectId, taskIdToComplete);
+          if (cleanupPrompt) {
+            return {
+              content: [{ type: 'text', text: `${normalText}\n\n${cleanupPrompt}` }],
+            };
+          }
+
+          // No context to clean up, clear task context
+          currentTaskId = null;
         }
 
         return {

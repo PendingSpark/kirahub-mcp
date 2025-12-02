@@ -143,6 +143,27 @@ export class A2AClient {
   }
 
   /**
+   * Extract task data from A2A response (for claim_task, get_task, etc.)
+   */
+  extractTaskData(response: A2AResponse): { id: string; readable_id: string; project_id: string } | null {
+    if (!response.result?.parts) {
+      return null;
+    }
+
+    for (const part of response.result.parts) {
+      if (part.kind === 'data' && part.data?.kind === 'task' && part.data?.id) {
+        return {
+          id: part.data.id,
+          readable_id: part.data.readable_id,
+          project_id: part.data.project_id,
+        };
+      }
+    }
+
+    return null;
+  }
+
+  /**
    * Extract text from A2A response
    */
   extractText(response: A2AResponse): string {
