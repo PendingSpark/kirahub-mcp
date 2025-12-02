@@ -13,6 +13,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { A2AClient } from './a2a-client.js';
 import { PlanEditorClient } from './plan-editor-client.js';
+import { ActivityClient, ActivityEventType, ContextCategory } from './activity-client.js';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -20,12 +21,17 @@ dotenv.config();
 const KIRAHUB_API_URL = process.env.KIRAHUB_API_URL || 'http://localhost:3000';
 const KIRAHUB_API_KEY = process.env.KIRAHUB_API_KEY;
 
+// Track current task context for automatic activity posting
+let currentTaskId: string | null = null;
+let currentProjectId: string | null = null;
+
 if (!KIRAHUB_API_KEY) {
   console.error('Error: KIRAHUB_API_KEY environment variable is required');
   process.exit(1);
 }
 
 const a2aClient = new A2AClient(KIRAHUB_API_URL, KIRAHUB_API_KEY);
+const activityClient = new ActivityClient(KIRAHUB_API_URL, KIRAHUB_API_KEY);
 
 const rawPlanEditorUrl =
   process.env.PLANCREATOR_API_URL ||
@@ -450,6 +456,155 @@ const tools: Tool[] = [
       required: ['project_id', 'knowledge_type', 'title', 'content'],
     },
   },
+
+  // Activity Tracking
+  {
+    name: 'post_activity',
+    description:
+      'Post an activity event to track what the agent is doing. Use this to log progress, decisions, file changes, etc.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        project_id: {
+          type: 'string',
+          description: 'Project ID',
+        },
+        task_id: {
+          type: 'string',
+          description: 'Task ID (optional - uses current task if not provided)',
+        },
+        event_type: {
+          type: 'string',
+          enum: [
+            'started',
+            'completed',
+            'file_modified',
+            'file_created',
+            'decision',
+            'blocked',
+            'question',
+            'error',
+          ],
+          description: 'Type of activity event',
+        },
+        message: {
+          type: 'string',
+          description: 'Description of what happened',
+        },
+        metadata: {
+          type: 'object',
+          description:
+            'Optional metadata (e.g., { files: ["src/auth.ts"], rationale: "..." })',
+        },
+      },
+      required: ['project_id', 'event_type', 'message'],
+    },
+  },
+  {
+    name: 'get_activity',
+    description: 'Get recent activity events for a project or task',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        project_id: {
+          type: 'string',
+          description: 'Project ID',
+        },
+        task_id: {
+          type: 'string',
+          description: 'Task ID (optional - if provided, gets task-specific activity)',
+        },
+        event_types: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Filter by event types (optional)',
+        },
+        limit: {
+          type: 'number',
+          description: 'Maximum number of events to return (default: 20)',
+        },
+      },
+      required: ['project_id'],
+    },
+  },
+
+  // Shared Context
+  {
+    name: 'get_shared_context',
+    description:
+      'Get shared context for a project (contracts, utilities, decisions, config)',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        project_id: {
+          type: 'string',
+          description: 'Project ID',
+        },
+        category: {
+          type: 'string',
+          enum: ['contracts', 'utilities', 'decisions', 'config'],
+          description: 'Optional category filter',
+        },
+        key: {
+          type: 'string',
+          description: 'Optional specific key to retrieve',
+        },
+      },
+      required: ['project_id'],
+    },
+  },
+  {
+    name: 'set_shared_context',
+    description:
+      'Set a shared context item (e.g., document a contract, utility, decision, or config)',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        project_id: {
+          type: 'string',
+          description: 'Project ID',
+        },
+        category: {
+          type: 'string',
+          enum: ['contracts', 'utilities', 'decisions', 'config'],
+          description: 'Context category',
+        },
+        key: {
+          type: 'string',
+          description: 'Unique key for this context item',
+        },
+        value: {
+          type: 'object',
+          description:
+            'Context value (e.g., { definition: "interface User {...}", location: "src/types.ts" })',
+        },
+      },
+      required: ['project_id', 'category', 'key', 'value'],
+    },
+  },
+  {
+    name: 'delete_shared_context',
+    description: 'Delete a shared context item',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        project_id: {
+          type: 'string',
+          description: 'Project ID',
+        },
+        category: {
+          type: 'string',
+          enum: ['contracts', 'utilities', 'decisions', 'config'],
+          description: 'Context category',
+        },
+        key: {
+          type: 'string',
+          description: 'Key of the context item to delete',
+        },
+      },
+      required: ['project_id', 'category', 'key'],
+    },
+  },
 ];
 
 if (planEditorClient) {
@@ -584,8 +739,32 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           };
         }
 
+        // Store current task for automatic activity tracking
+        currentTaskId = task_id;
+
+        // Try to extract project ID from the response and auto-post activity
+        const responseText = a2aClient.extractText(response);
+
+        // Try to post "started" activity (best effort - don't fail if this fails)
+        try {
+          // Extract project ID from response if available
+          const projectMatch = responseText.match(/project[:\s]+([a-f0-9-]{36})/i);
+          if (projectMatch) {
+            currentProjectId = projectMatch[1];
+            await activityClient.postActivity({
+              projectId: currentProjectId,
+              taskId: task_id,
+              eventType: 'started',
+              message: 'Claimed and started working on task',
+            });
+            console.error(`[claim_task] Auto-posted 'started' activity for task ${task_id}`);
+          }
+        } catch (activityError) {
+          console.error('[claim_task] Failed to auto-post activity (non-fatal):', activityError);
+        }
+
         return {
-          content: [{ type: 'text', text: a2aClient.extractText(response) }],
+          content: [{ type: 'text', text: responseText }],
         };
       }
 
@@ -647,6 +826,24 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (validationResult) {
           console.error('[complete_task] Validation result detected:', validationResult);
           const text = a2aClient.extractText(response);
+
+          // If validation passed, post completed activity
+          if (validationResult.validationResult === 'passed' && currentProjectId && currentTaskId) {
+            try {
+              await activityClient.postActivity({
+                projectId: currentProjectId,
+                taskId: currentTaskId,
+                eventType: 'completed',
+                message: `Task completed with validation score: ${validationResult.score}%`,
+              });
+              console.error(`[complete_task] Auto-posted 'completed' activity for task ${currentTaskId}`);
+              // Clear current task context
+              currentTaskId = null;
+            } catch (activityError) {
+              console.error('[complete_task] Failed to auto-post activity (non-fatal):', activityError);
+            }
+          }
+
           return {
             content: [
               {
@@ -657,9 +854,27 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           };
         }
 
-        // Normal response - log what we're returning
+        // Normal response (no validation) - task was completed directly
         const normalText = a2aClient.extractText(response);
         console.error('[complete_task] Normal response (no validation):', normalText);
+
+        // Check if the response indicates success and post activity
+        const taskIdToComplete = task_id || currentTaskId;
+        if (taskIdToComplete && currentProjectId && !normalText.toLowerCase().includes('error')) {
+          try {
+            await activityClient.postActivity({
+              projectId: currentProjectId,
+              taskId: taskIdToComplete,
+              eventType: 'completed',
+              message: 'Task completed',
+            });
+            console.error(`[complete_task] Auto-posted 'completed' activity for task ${taskIdToComplete}`);
+            // Clear current task context
+            currentTaskId = null;
+          } catch (activityError) {
+            console.error('[complete_task] Failed to auto-post activity (non-fatal):', activityError);
+          }
+        }
 
         return {
           content: [{ type: 'text', text: normalText }],
@@ -986,6 +1201,247 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         return {
           content: [{ type: 'text', text: a2aClient.extractText(response) }],
         };
+      }
+
+      // Activity Tracking Handlers
+      case 'post_activity': {
+        const { project_id, task_id, event_type, message, metadata } = args as {
+          project_id: string;
+          task_id?: string;
+          event_type: ActivityEventType;
+          message: string;
+          metadata?: Record<string, any>;
+        };
+
+        try {
+          const activity = await activityClient.postActivity({
+            projectId: project_id,
+            taskId: task_id || currentTaskId || undefined,
+            eventType: event_type,
+            message,
+            metadata,
+          });
+
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Activity posted: [${activity.eventType}] ${activity.message}\nID: ${activity.id}`,
+              },
+            ],
+          };
+        } catch (error: any) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Failed to post activity: ${error.message || error}`,
+              },
+            ],
+            isError: true,
+          };
+        }
+      }
+
+      case 'get_activity': {
+        const { project_id, task_id, event_types, limit } = args as {
+          project_id: string;
+          task_id?: string;
+          event_types?: string[];
+          limit?: number;
+        };
+
+        try {
+          let activities;
+          if (task_id) {
+            activities = await activityClient.getTaskActivity(task_id, limit);
+          } else {
+            activities = await activityClient.getProjectActivity({
+              projectId: project_id,
+              eventTypes: event_types as ActivityEventType[],
+              limit: limit || 20,
+            });
+          }
+
+          if (activities.length === 0) {
+            return {
+              content: [{ type: 'text', text: 'No activity events found.' }],
+            };
+          }
+
+          const formatted = activities
+            .map(
+              (a) =>
+                `[${a.eventType}] ${a.message}${a.taskId ? ` (task: ${a.taskId.slice(0, 8)}...)` : ''}\n  ${new Date(a.createdAt).toLocaleString()}`
+            )
+            .join('\n\n');
+
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Recent Activity (${activities.length} events):\n\n${formatted}`,
+              },
+            ],
+          };
+        } catch (error: any) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Failed to get activity: ${error.message || error}`,
+              },
+            ],
+            isError: true,
+          };
+        }
+      }
+
+      // Shared Context Handlers
+      case 'get_shared_context': {
+        const { project_id, category, key } = args as {
+          project_id: string;
+          category?: ContextCategory;
+          key?: string;
+        };
+
+        try {
+          if (category && key) {
+            // Get specific item
+            const item = await activityClient.getContextItem(
+              project_id,
+              category,
+              key
+            );
+            if (!item) {
+              return {
+                content: [
+                  {
+                    type: 'text',
+                    text: `Context item not found: ${category}/${key}`,
+                  },
+                ],
+              };
+            }
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: `Context: ${category}/${key}\n\n${JSON.stringify(item.value, null, 2)}`,
+                },
+              ],
+            };
+          }
+
+          // Get all context
+          const context = await activityClient.getContext(project_id);
+
+          const lines: string[] = ['Project Shared Context:'];
+
+          for (const cat of ['contracts', 'utilities', 'decisions', 'config'] as ContextCategory[]) {
+            const items = context[cat] || {};
+            const keys = Object.keys(items);
+            if (keys.length > 0) {
+              lines.push(`\n## ${cat.charAt(0).toUpperCase() + cat.slice(1)}`);
+              for (const k of keys) {
+                lines.push(`  - ${k}`);
+              }
+            }
+          }
+
+          if (lines.length === 1) {
+            lines.push('\n(No context items found)');
+          }
+
+          return {
+            content: [{ type: 'text', text: lines.join('\n') }],
+          };
+        } catch (error: any) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Failed to get context: ${error.message || error}`,
+              },
+            ],
+            isError: true,
+          };
+        }
+      }
+
+      case 'set_shared_context': {
+        const { project_id, category, key, value } = args as {
+          project_id: string;
+          category: ContextCategory;
+          key: string;
+          value: Record<string, any>;
+        };
+
+        try {
+          const result = await activityClient.setContext({
+            projectId: project_id,
+            category,
+            key,
+            value,
+            taskId: currentTaskId || undefined,
+          });
+
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Context ${result.created ? 'created' : 'updated'}: ${category}/${key}`,
+              },
+            ],
+          };
+        } catch (error: any) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Failed to set context: ${error.message || error}`,
+              },
+            ],
+            isError: true,
+          };
+        }
+      }
+
+      case 'delete_shared_context': {
+        const { project_id, category, key } = args as {
+          project_id: string;
+          category: ContextCategory;
+          key: string;
+        };
+
+        try {
+          const deleted = await activityClient.deleteContext(
+            project_id,
+            category,
+            key
+          );
+
+          return {
+            content: [
+              {
+                type: 'text',
+                text: deleted
+                  ? `Context deleted: ${category}/${key}`
+                  : `Context item not found: ${category}/${key}`,
+              },
+            ],
+          };
+        } catch (error: any) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Failed to delete context: ${error.message || error}`,
+              },
+            ],
+            isError: true,
+          };
+        }
       }
 
       case 'get_plan_overview': {
