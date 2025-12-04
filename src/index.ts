@@ -607,7 +607,7 @@ const tools: Tool[] = [
       properties: {
         project_id: {
           type: 'string',
-          description: 'Project ID',
+          description: 'Project ID (optional - uses current project from claimed task if not provided)',
         },
         task_id: {
           type: 'string',
@@ -658,7 +658,7 @@ const tools: Tool[] = [
             'Optional metadata (e.g., { files: ["src/auth.ts"], rationale: "..." })',
         },
       },
-      required: ['project_id', 'event_type', 'message'],
+      required: ['event_type', 'message'],
     },
   },
   {
@@ -669,7 +669,7 @@ const tools: Tool[] = [
       properties: {
         project_id: {
           type: 'string',
-          description: 'Project ID',
+          description: 'Project ID (optional - uses current project from claimed task if not provided)',
         },
         task_id: {
           type: 'string',
@@ -685,7 +685,7 @@ const tools: Tool[] = [
           description: 'Maximum number of events to return (default: 20)',
         },
       },
-      required: ['project_id'],
+      required: [],
     },
   },
 
@@ -699,7 +699,7 @@ const tools: Tool[] = [
       properties: {
         project_id: {
           type: 'string',
-          description: 'Project ID',
+          description: 'Project ID (optional - uses current project from claimed task if not provided)',
         },
         category: {
           type: 'string',
@@ -711,7 +711,7 @@ const tools: Tool[] = [
           description: 'Optional specific key to retrieve',
         },
       },
-      required: ['project_id'],
+      required: [],
     },
   },
   {
@@ -723,7 +723,7 @@ const tools: Tool[] = [
       properties: {
         project_id: {
           type: 'string',
-          description: 'Project ID',
+          description: 'Project ID (optional - uses current project from claimed task if not provided)',
         },
         category: {
           type: 'string',
@@ -740,7 +740,7 @@ const tools: Tool[] = [
             'Context value (e.g., { definition: "interface User {...}", location: "src/types.ts" })',
         },
       },
-      required: ['project_id', 'category', 'key', 'value'],
+      required: ['category', 'key', 'value'],
     },
   },
   {
@@ -751,7 +751,7 @@ const tools: Tool[] = [
       properties: {
         project_id: {
           type: 'string',
-          description: 'Project ID',
+          description: 'Project ID (optional - uses current project from claimed task if not provided)',
         },
         category: {
           type: 'string',
@@ -763,7 +763,7 @@ const tools: Tool[] = [
           description: 'Key of the context item to delete',
         },
       },
-      required: ['project_id', 'category', 'key'],
+      required: ['category', 'key'],
     },
   },
 ];
@@ -1515,16 +1515,30 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       // Activity Tracking Handlers
       case 'post_activity': {
         const { project_id, task_id, event_type, message, metadata } = args as {
-          project_id: string;
+          project_id?: string;
           task_id?: string;
           event_type: ActivityEventType;
           message: string;
           metadata?: Record<string, any>;
         };
 
+        // Use provided project_id, or fall back to currentProjectId from claimed task
+        const resolvedProjectId = project_id || currentProjectId;
+        if (!resolvedProjectId) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: 'No project context available. Either provide project_id or claim a task first.',
+              },
+            ],
+            isError: true,
+          };
+        }
+
         try {
           const activity = await activityClient.postActivity({
-            projectId: project_id,
+            projectId: resolvedProjectId,
             taskId: task_id || currentTaskId || undefined,
             eventType: event_type,
             message,
@@ -1554,22 +1568,35 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case 'get_activity': {
         const { project_id, task_id, event_types, limit } = args as {
-          project_id: string;
+          project_id?: string;
           task_id?: string;
           event_types?: string[];
           limit?: number;
         };
 
+        // Use provided project_id, or fall back to currentProjectId from claimed task
+        const resolvedProjectId = project_id || currentProjectId;
+
         try {
           let activities;
           if (task_id) {
             activities = await activityClient.getTaskActivity(task_id, limit);
-          } else {
+          } else if (resolvedProjectId) {
             activities = await activityClient.getProjectActivity({
-              projectId: project_id,
+              projectId: resolvedProjectId,
               eventTypes: event_types as ActivityEventType[],
               limit: limit || 20,
             });
+          } else {
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: 'No project context available. Either provide project_id, task_id, or claim a task first.',
+                },
+              ],
+              isError: true,
+            };
           }
 
           if (activities.length === 0) {
@@ -1609,16 +1636,30 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       // Shared Context Handlers
       case 'get_shared_context': {
         const { project_id, category, key } = args as {
-          project_id: string;
+          project_id?: string;
           category?: ContextCategory;
           key?: string;
         };
+
+        // Use provided project_id, or fall back to currentProjectId from claimed task
+        const resolvedProjectId = project_id || currentProjectId;
+        if (!resolvedProjectId) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: 'No project context available. Either provide project_id or claim a task first.',
+              },
+            ],
+            isError: true,
+          };
+        }
 
         try {
           if (category && key) {
             // Get specific item
             const item = await activityClient.getContextItem(
-              project_id,
+              resolvedProjectId,
               category,
               key
             );
@@ -1643,7 +1684,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           }
 
           // Get all context
-          const context = await activityClient.getContext(project_id);
+          const context = await activityClient.getContext(resolvedProjectId);
 
           const lines: string[] = ['Project Shared Context:'];
 
@@ -1680,15 +1721,29 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case 'set_shared_context': {
         const { project_id, category, key, value } = args as {
-          project_id: string;
+          project_id?: string;
           category: ContextCategory;
           key: string;
           value: Record<string, any>;
         };
 
+        // Use provided project_id, or fall back to currentProjectId from claimed task
+        const resolvedProjectId = project_id || currentProjectId;
+        if (!resolvedProjectId) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: 'No project context available. Either provide project_id or claim a task first.',
+              },
+            ],
+            isError: true,
+          };
+        }
+
         try {
           const result = await activityClient.setContext({
-            projectId: project_id,
+            projectId: resolvedProjectId,
             category,
             key,
             value,
@@ -1718,14 +1773,28 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case 'delete_shared_context': {
         const { project_id, category, key } = args as {
-          project_id: string;
+          project_id?: string;
           category: ContextCategory;
           key: string;
         };
 
+        // Use provided project_id, or fall back to currentProjectId from claimed task
+        const resolvedProjectId = project_id || currentProjectId;
+        if (!resolvedProjectId) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: 'No project context available. Either provide project_id or claim a task first.',
+              },
+            ],
+            isError: true,
+          };
+        }
+
         try {
           const deleted = await activityClient.deleteContext(
-            project_id,
+            resolvedProjectId,
             category,
             key
           );
