@@ -1177,7 +1177,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (status) message += `\nNew status: ${status}`;
         if (tags) message += `\nNew tags: ${tags.join(', ')}`;
 
-        const response = await a2aClient.sendMessage(message);
+        const entities: Record<string, any> = { taskId: task_id };
+        if (title) entities.title = title;
+        if (description) entities.description = description;
+        if (status) entities.status = status;
+        if (tags) entities.tags = tags;
+
+        const response = await a2aClient.sendMessage(message, undefined, entities);
 
         if (a2aClient.hasError(response)) {
           return {
