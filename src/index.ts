@@ -224,7 +224,7 @@ const tools: Tool[] = [
       properties: {
         project_id: {
           type: 'string',
-          description: 'Optional project ID to filter tasks',
+          description: 'Optional project identifier (UUID, readable_id, or name/slug) to filter tasks',
         },
       },
     },
@@ -278,7 +278,7 @@ const tools: Tool[] = [
         },
         project_id: {
           type: 'string',
-          description: 'Project ID (required if epic_id not provided)',
+          description: 'Project identifier - UUID, readable_id, or name/slug (required if epic_id not provided)',
         },
         epic_id: {
           type: 'string',
@@ -349,7 +349,7 @@ const tools: Tool[] = [
       properties: {
         project_id: {
           type: 'string',
-          description: 'Project ID',
+          description: 'Project identifier (UUID, readable_id, or name/slug)',
         },
       },
       required: ['project_id'],
@@ -377,7 +377,7 @@ const tools: Tool[] = [
       properties: {
         project_id: {
           type: 'string',
-          description: 'Project ID',
+          description: 'Project identifier (UUID, readable_id, or name/slug)',
         },
         name: {
           type: 'string',
@@ -551,7 +551,7 @@ const tools: Tool[] = [
       properties: {
         project_id: {
           type: 'string',
-          description: 'Project ID',
+          description: 'Project identifier (UUID, readable_id, or name/slug)',
         },
         search: {
           type: 'string',
@@ -573,7 +573,7 @@ const tools: Tool[] = [
       properties: {
         project_id: {
           type: 'string',
-          description: 'Project ID',
+          description: 'Project identifier (UUID, readable_id, or name/slug)',
         },
         knowledge_type: {
           type: 'string',
@@ -607,7 +607,7 @@ const tools: Tool[] = [
       properties: {
         project_id: {
           type: 'string',
-          description: 'Project ID (optional - uses current project from claimed task if not provided)',
+          description: 'Project identifier - UUID, readable_id, or name/slug (optional - uses current project from claimed task if not provided)',
         },
         task_id: {
           type: 'string',
@@ -669,7 +669,7 @@ const tools: Tool[] = [
       properties: {
         project_id: {
           type: 'string',
-          description: 'Project ID (optional - uses current project from claimed task if not provided)',
+          description: 'Project identifier - UUID, readable_id, or name/slug (optional - uses current project from claimed task if not provided)',
         },
         task_id: {
           type: 'string',
@@ -699,7 +699,7 @@ const tools: Tool[] = [
       properties: {
         project_id: {
           type: 'string',
-          description: 'Project ID (optional - uses current project from claimed task if not provided)',
+          description: 'Project identifier - UUID, readable_id, or name/slug (optional - uses current project from claimed task if not provided)',
         },
         category: {
           type: 'string',
@@ -723,7 +723,7 @@ const tools: Tool[] = [
       properties: {
         project_id: {
           type: 'string',
-          description: 'Project ID (optional - uses current project from claimed task if not provided)',
+          description: 'Project identifier - UUID, readable_id, or name/slug (optional - uses current project from claimed task if not provided)',
         },
         category: {
           type: 'string',
@@ -751,7 +751,7 @@ const tools: Tool[] = [
       properties: {
         project_id: {
           type: 'string',
-          description: 'Project ID (optional - uses current project from claimed task if not provided)',
+          description: 'Project identifier - UUID, readable_id, or name/slug (optional - uses current project from claimed task if not provided)',
         },
         category: {
           type: 'string',
