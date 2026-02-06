@@ -74,10 +74,24 @@ export class A2AClient {
 
   /**
    * Send a message via A2A protocol
+   * @param text Natural language message text
+   * @param contextId Optional conversation context ID
+   * @param structuredEntities Optional structured entities to pass alongside NLP text.
+   *   These are included as a data part and take precedence over NLP-parsed entities on the backend.
    */
-  async sendMessage(text: string, contextId?: string): Promise<A2AResponse> {
+  async sendMessage(text: string, contextId?: string, structuredEntities?: Record<string, any>): Promise<A2AResponse> {
     this.requestCounter++;
     const messageId = uuidv4();
+
+    const parts: Array<{ kind: string; text?: string; data?: any }> = [
+      { kind: 'text', text },
+    ];
+
+    // Include structured entities as a data part so the backend can use them
+    // directly instead of relying on NLP extraction
+    if (structuredEntities && Object.keys(structuredEntities).length > 0) {
+      parts.push({ kind: 'data', data: { _structuredEntities: structuredEntities } });
+    }
 
     const request = {
       jsonrpc: '2.0',
@@ -87,7 +101,7 @@ export class A2AClient {
           messageId,
           role: 'user',
           kind: 'message',
-          parts: [{ kind: 'text', text }],
+          parts,
         },
         ...(contextId && { contextId }),
       },

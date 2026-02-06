@@ -871,7 +871,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const message = args?.project_id
           ? `Get my next task from project ${args.project_id}`
           : 'Get my next task';
-        const response = await a2aClient.sendMessage(message);
+        const structuredEntities = args?.project_id
+          ? { projectId: args.project_id }
+          : undefined;
+        const response = await a2aClient.sendMessage(message, undefined, structuredEntities);
 
         if (a2aClient.hasError(response)) {
           return {
@@ -1140,7 +1143,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (epic_id) message += `\nEpic: ${epic_id}`;
         if (tags) message += `\nTags: ${tags.join(', ')}`;
 
-        const response = await a2aClient.sendMessage(message);
+        const entities: Record<string, any> = { title };
+        if (description) entities.description = description;
+        if (project_id) entities.projectId = project_id;
+        if (epic_id) entities.epicId = epic_id;
+        if (tags) entities.tags = tags;
+
+        const response = await a2aClient.sendMessage(message, undefined, entities);
 
         if (a2aClient.hasError(response)) {
           return {
@@ -1261,7 +1270,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case 'list_epics': {
         const { project_id } = args as { project_id: string };
         const response = await a2aClient.sendMessage(
-          `List all epics for project ${project_id}`
+          `List all epics for project ${project_id}`,
+          undefined,
+          { projectId: project_id }
         );
 
         if (a2aClient.hasError(response)) {
@@ -1303,7 +1314,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         let message = `Create a new epic in project ${project_id}: ${name}`;
         if (description) message += `\nDescription: ${description}`;
 
-        const response = await a2aClient.sendMessage(message);
+        const entities: Record<string, any> = { epicName: name };
+        if (project_id) entities.projectId = project_id;
+        if (description) entities.epicDescription = description;
+
+        const response = await a2aClient.sendMessage(message, undefined, entities);
 
         if (a2aClient.hasError(response)) {
           return {
@@ -1475,7 +1490,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (search) message += `: ${search}`;
         if (type) message += ` (type: ${type})`;
 
-        const response = await a2aClient.sendMessage(message);
+        const entities: Record<string, any> = { projectId: project_id };
+        if (search) entities.query = search;
+        if (type) entities.knowledgeType = type;
+
+        const response = await a2aClient.sendMessage(message, undefined, entities);
 
         if (a2aClient.hasError(response)) {
           return {
