@@ -892,7 +892,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case 'claim_task': {
         const { task_id } = args as { task_id: string };
-        const response = await a2aClient.sendMessage(`Claim task ${task_id}`);
+        const response = await a2aClient.sendMessage(
+          `Claim task ${task_id}`,
+          undefined,
+          { taskId: task_id }
+        );
 
         if (a2aClient.hasError(response)) {
           return {
@@ -1192,7 +1196,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case 'get_task_details': {
         const { task_id } = args as { task_id: string };
         const response = await a2aClient.sendMessage(
-          `Get details for task ${task_id}`
+          `Get details for task ${task_id}`,
+          undefined,
+          { taskId: task_id }
         );
 
         if (a2aClient.hasError(response)) {
