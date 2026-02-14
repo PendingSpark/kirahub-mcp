@@ -20,6 +20,7 @@ dotenv.config();
 
 const KIRAHUB_API_URL = process.env.KIRAHUB_API_URL || 'http://localhost:3000';
 const KIRAHUB_API_KEY = process.env.KIRAHUB_API_KEY;
+const KIRAHUB_PROJECT_ID = process.env.KIRAHUB_PROJECT_ID || null;
 
 // Track current task context for automatic activity posting
 let currentTaskId: string | null = null;
@@ -35,6 +36,10 @@ let pendingContextCleanup: {
 if (!KIRAHUB_API_KEY) {
   console.error('Error: KIRAHUB_API_KEY environment variable is required');
   process.exit(1);
+}
+
+if (KIRAHUB_PROJECT_ID) {
+  console.error(`Default project configured: ${KIRAHUB_PROJECT_ID}`);
 }
 
 const a2aClient = new A2AClient(KIRAHUB_API_URL, KIRAHUB_API_KEY);
@@ -843,6 +848,26 @@ if (planEditorClient) {
   );
 }
 
+// When a default project is configured, update tool definitions:
+// 1. Append default info to project_id descriptions
+// 2. Remove project_id from required arrays (since the default covers it)
+if (KIRAHUB_PROJECT_ID) {
+  for (const tool of tools) {
+    const schema = tool.inputSchema as any;
+    if (schema?.properties?.project_id) {
+      schema.properties.project_id = {
+        ...schema.properties.project_id,
+        description:
+          (schema.properties.project_id.description || '') +
+          ` (defaults to configured project: ${KIRAHUB_PROJECT_ID})`,
+      };
+      if (Array.isArray(schema.required)) {
+        schema.required = schema.required.filter((r: string) => r !== 'project_id');
+      }
+    }
+  }
+}
+
 // Create MCP server
 const server = new Server(
   {
@@ -868,11 +893,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   try {
     switch (name) {
       case 'get_next_task': {
-        const message = args?.project_id
-          ? `Get my next task from project ${args.project_id}`
+        const effectiveProjectId = args?.project_id || KIRAHUB_PROJECT_ID;
+        const message = effectiveProjectId
+          ? `Get my next task from project ${effectiveProjectId}`
           : 'Get my next task';
-        const structuredEntities = args?.project_id
-          ? { projectId: args.project_id }
+        const structuredEntities = effectiveProjectId
+          ? { projectId: effectiveProjectId }
           : undefined;
         const response = await a2aClient.sendMessage(message, undefined, structuredEntities);
 
@@ -1141,15 +1167,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case 'create_task': {
         const { title, description, project_id, epic_id, tags } = args as any;
+        const effectiveProjectId = project_id || KIRAHUB_PROJECT_ID;
         let message = `Create a new task: ${title}`;
         if (description) message += `\nDescription: ${description}`;
-        if (project_id) message += `\nProject: ${project_id}`;
+        if (effectiveProjectId) message += `\nProject: ${effectiveProjectId}`;
         if (epic_id) message += `\nEpic: ${epic_id}`;
         if (tags) message += `\nTags: ${tags.join(', ')}`;
 
         const entities: Record<string, any> = { title };
         if (description) entities.description = description;
-        if (project_id) entities.projectId = project_id;
+        if (effectiveProjectId) entities.projectId = effectiveProjectId;
         if (epic_id) entities.epicId = epic_id;
         if (tags) entities.tags = tags;
 
@@ -1280,11 +1307,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case 'list_epics': {
-        const { project_id } = args as { project_id: string };
+        const effectiveProjectId = (args as any)?.project_id || KIRAHUB_PROJECT_ID;
+        if (!effectiveProjectId) {
+          return {
+            content: [{ type: 'text', text: 'project_id is required. Provide it explicitly or set KIRAHUB_PROJECT_ID.' }],
+            isError: true,
+          };
+        }
         const response = await a2aClient.sendMessage(
-          `List all epics for project ${project_id}`,
+          `List all epics for project ${effectiveProjectId}`,
           undefined,
-          { projectId: project_id }
+          { projectId: effectiveProjectId }
         );
 
         if (a2aClient.hasError(response)) {
@@ -1323,11 +1356,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case 'create_epic': {
         const { project_id, name, description } = args as any;
-        let message = `Create a new epic in project ${project_id}: ${name}`;
+        const effectiveProjectId = project_id || KIRAHUB_PROJECT_ID;
+        if (!effectiveProjectId) {
+          return {
+            content: [{ type: 'text', text: 'project_id is required. Provide it explicitly or set KIRAHUB_PROJECT_ID.' }],
+            isError: true,
+          };
+        }
+        let message = `Create a new epic in project ${effectiveProjectId}: ${name}`;
         if (description) message += `\nDescription: ${description}`;
 
         const entities: Record<string, any> = { epicName: name };
-        if (project_id) entities.projectId = project_id;
+        entities.projectId = effectiveProjectId;
         if (description) entities.epicDescription = description;
 
         const response = await a2aClient.sendMessage(message, undefined, entities);
@@ -1498,11 +1538,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case 'get_project_knowledge': {
         const { project_id, search, type } = args as any;
-        let message = `Search knowledge base for project ${project_id}`;
+        const effectiveProjectId = project_id || KIRAHUB_PROJECT_ID;
+        if (!effectiveProjectId) {
+          return {
+            content: [{ type: 'text', text: 'project_id is required. Provide it explicitly or set KIRAHUB_PROJECT_ID.' }],
+            isError: true,
+          };
+        }
+        let message = `Search knowledge base for project ${effectiveProjectId}`;
         if (search) message += `: ${search}`;
         if (type) message += ` (type: ${type})`;
 
-        const entities: Record<string, any> = { projectId: project_id };
+        const entities: Record<string, any> = { projectId: effectiveProjectId };
         if (search) entities.query = search;
         if (type) entities.knowledgeType = type;
 
@@ -1524,7 +1571,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case 'add_project_knowledge': {
         const { project_id, knowledge_type, title, content, tags } = args as any;
-        let message = `Add ${knowledge_type} knowledge to project ${project_id}: ${title}\nContent: ${content}`;
+        const effectiveProjectId = project_id || KIRAHUB_PROJECT_ID;
+        if (!effectiveProjectId) {
+          return {
+            content: [{ type: 'text', text: 'project_id is required. Provide it explicitly or set KIRAHUB_PROJECT_ID.' }],
+            isError: true,
+          };
+        }
+        let message = `Add ${knowledge_type} knowledge to project ${effectiveProjectId}: ${title}\nContent: ${content}`;
         if (tags) message += `\nTags: ${tags.join(', ')}`;
 
         const response = await a2aClient.sendMessage(message);
@@ -1553,8 +1607,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           metadata?: Record<string, any>;
         };
 
-        // Use provided project_id, or fall back to currentProjectId from claimed task
-        const resolvedProjectId = project_id || currentProjectId;
+        // Use provided project_id, or fall back to currentProjectId, or default project
+        const resolvedProjectId = project_id || currentProjectId || KIRAHUB_PROJECT_ID;
         if (!resolvedProjectId) {
           return {
             content: [
@@ -1605,8 +1659,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           limit?: number;
         };
 
-        // Use provided project_id, or fall back to currentProjectId from claimed task
-        const resolvedProjectId = project_id || currentProjectId;
+        // Use provided project_id, or fall back to currentProjectId, or default project
+        const resolvedProjectId = project_id || currentProjectId || KIRAHUB_PROJECT_ID;
 
         try {
           let activities;
@@ -1672,8 +1726,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           key?: string;
         };
 
-        // Use provided project_id, or fall back to currentProjectId from claimed task
-        const resolvedProjectId = project_id || currentProjectId;
+        // Use provided project_id, or fall back to currentProjectId, or default project
+        const resolvedProjectId = project_id || currentProjectId || KIRAHUB_PROJECT_ID;
         if (!resolvedProjectId) {
           return {
             content: [
@@ -1758,8 +1812,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           value: Record<string, any>;
         };
 
-        // Use provided project_id, or fall back to currentProjectId from claimed task
-        const resolvedProjectId = project_id || currentProjectId;
+        // Use provided project_id, or fall back to currentProjectId, or default project
+        const resolvedProjectId = project_id || currentProjectId || KIRAHUB_PROJECT_ID;
         if (!resolvedProjectId) {
           return {
             content: [
@@ -1809,8 +1863,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           key: string;
         };
 
-        // Use provided project_id, or fall back to currentProjectId from claimed task
-        const resolvedProjectId = project_id || currentProjectId;
+        // Use provided project_id, or fall back to currentProjectId, or default project
+        const resolvedProjectId = project_id || currentProjectId || KIRAHUB_PROJECT_ID;
         if (!resolvedProjectId) {
           return {
             content: [
@@ -1866,8 +1920,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           };
         }
 
-        const { project_id } = args as { project_id: string };
-        const plan = await planEditorClient.getProjectPlan(project_id);
+        const effectiveProjectId = (args as any)?.project_id || KIRAHUB_PROJECT_ID;
+        if (!effectiveProjectId) {
+          return {
+            content: [{ type: 'text', text: 'project_id is required. Provide it explicitly or set KIRAHUB_PROJECT_ID.' }],
+            isError: true,
+          };
+        }
+        const plan = await planEditorClient.getProjectPlan(effectiveProjectId);
         const manifest = plan.manifest || {};
         const overviewText = plan.overview?.trim() || 'No overview available.';
         const tasksCount = plan.tasks?.length ?? 0;
@@ -1896,7 +1956,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
         if (planEditorBaseUrl) {
           lines.push(
-            `PlanCreator API: ${planEditorBaseUrl}/plan/${encodeURIComponent(project_id)}`
+            `PlanCreator API: ${planEditorBaseUrl}/plan/${encodeURIComponent(effectiveProjectId)}`
           );
         }
 
@@ -1920,8 +1980,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           };
         }
 
-        const { project_id } = args as { project_id: string };
-        const plan = await planEditorClient.getProjectPlan(project_id);
+        const effectiveProjectId = (args as any)?.project_id || KIRAHUB_PROJECT_ID;
+        if (!effectiveProjectId) {
+          return {
+            content: [{ type: 'text', text: 'project_id is required. Provide it explicitly or set KIRAHUB_PROJECT_ID.' }],
+            isError: true,
+          };
+        }
+        const plan = await planEditorClient.getProjectPlan(effectiveProjectId);
         const tasks = plan.tasks || [];
 
         if (!tasks.length) {
@@ -1929,7 +1995,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             content: [
               {
                 type: 'text',
-                text: `No plan tasks found for project ${project_id}.`,
+                text: `No plan tasks found for project ${effectiveProjectId}.`,
               },
             ],
           };
@@ -1963,7 +2029,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           content: [
             {
               type: 'text',
-              text: [`Tasks for project ${project_id}:`, ...formattedTasks].join('\n'),
+              text: [`Tasks for project ${effectiveProjectId}:`, ...formattedTasks].join('\n'),
             },
           ],
         };
@@ -1982,19 +2048,23 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           };
         }
 
-        const { project_id, task_id } = args as {
-          project_id: string;
-          task_id: string;
-        };
+        const { task_id } = args as { task_id: string };
+        const effectiveProjectId = (args as any)?.project_id || KIRAHUB_PROJECT_ID;
+        if (!effectiveProjectId) {
+          return {
+            content: [{ type: 'text', text: 'project_id is required. Provide it explicitly or set KIRAHUB_PROJECT_ID.' }],
+            isError: true,
+          };
+        }
 
-        const task = await planEditorClient.getTaskDetails(project_id, task_id);
+        const task = await planEditorClient.getTaskDetails(effectiveProjectId, task_id);
 
         if (!task) {
           return {
             content: [
               {
                 type: 'text',
-                text: `Task '${task_id}' not found in project ${project_id}. Try 'list_plan_tasks' to view available tasks.`,
+                text: `Task '${task_id}' not found in project ${effectiveProjectId}. Try 'list_plan_tasks' to view available tasks.`,
               },
             ],
             isError: true,
@@ -2045,19 +2115,23 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           };
         }
 
-        const { project_id, query } = args as {
-          project_id: string;
-          query: string;
-        };
+        const { query } = args as { query: string };
+        const effectiveProjectId = (args as any)?.project_id || KIRAHUB_PROJECT_ID;
+        if (!effectiveProjectId) {
+          return {
+            content: [{ type: 'text', text: 'project_id is required. Provide it explicitly or set KIRAHUB_PROJECT_ID.' }],
+            isError: true,
+          };
+        }
 
-        const results = await planEditorClient.searchTasks(project_id, query);
+        const results = await planEditorClient.searchTasks(effectiveProjectId, query);
 
         if (!results.length) {
           return {
             content: [
               {
                 type: 'text',
-                text: `No plan tasks matched '${query}' in project ${project_id}.`,
+                text: `No plan tasks matched '${query}' in project ${effectiveProjectId}.`,
               },
             ],
           };
@@ -2089,7 +2163,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           content: [
             {
               type: 'text',
-              text: [`Search results for '${query}' in project ${project_id}:`, ...formattedResults].join('\n'),
+              text: [`Search results for '${query}' in project ${effectiveProjectId}:`, ...formattedResults].join('\n'),
             },
           ],
         };
