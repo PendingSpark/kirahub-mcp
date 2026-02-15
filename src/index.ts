@@ -509,6 +509,27 @@ const tools: Tool[] = [
     },
   },
 
+  // Plan Syncing
+  {
+    name: 'sync_plan',
+    description:
+      'Sync an implementation plan to the currently claimed task as a working note. Uses the current task context automatically - no task_id needed. Previous plan notes are auto-resolved. Call this after exiting plan mode.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        plan: {
+          type: 'string',
+          description: 'The implementation plan content',
+        },
+        task_id: {
+          type: 'string',
+          description: 'Optional task ID override (uses currently claimed task if omitted)',
+        },
+      },
+      required: ['plan'],
+    },
+  },
+
   // Task Dependencies
   {
     name: 'add_task_dependency',
@@ -1013,8 +1034,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           }
         }
 
+        const workflowReminder = '\n\n---\n## Workflow\n- After exiting plan mode, call `sync_plan` with your plan content to share it with the team.\n- Use `add_working_note` with `type: "information"` for progress updates during implementation.';
+
         return {
-          content: [{ type: 'text', text: responseText + contextBundle }],
+          content: [{ type: 'text', text: responseText + contextBundle + workflowReminder }],
         };
       }
 
@@ -1033,6 +1056,22 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           return {
             content: [{ type: 'text', text: cleanupResult }],
           };
+        }
+
+        // Check if a plan was ever synced (best effort, non-blocking)
+        let planWarning = '';
+        const taskIdToCheck = task_id || currentTaskId;
+        if (taskIdToCheck && !message) {
+          // Only check on initial completion call, not validation answers
+          try {
+            const notes = await activityClient.getTaskNotes(taskIdToCheck);
+            const hasPlan = notes.some(n => n.type === 'plan');
+            if (!hasPlan) {
+              planWarning = '\n\n**Note:** No implementation plan was synced for this task. Consider calling `sync_plan` before completing to share your approach with the team.';
+            }
+          } catch (e) {
+            console.error('[complete_task] Failed to check plan notes (non-fatal):', e);
+          }
         }
 
         // Build the request message based on what parameters are provided
@@ -1076,7 +1115,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             content: [
               {
                 type: 'text',
-                text: `${text}\n\n**Validation Question ${validationQuestion.currentQuestion.sequenceNumber}** (${validationQuestion.currentQuestion.type}):\n${validationQuestion.currentQuestion.text}\n\n**To answer this question, call complete_task again with the answer in the message parameter.**`,
+                text: `${text}\n\n**Validation Question ${validationQuestion.currentQuestion.sequenceNumber}** (${validationQuestion.currentQuestion.type}):\n${validationQuestion.currentQuestion.text}\n\n**To answer this question, call complete_task again with the answer in the message parameter.**${planWarning}`,
               },
             ],
           };
@@ -1161,7 +1200,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
 
         return {
-          content: [{ type: 'text', text: normalText }],
+          content: [{ type: 'text', text: normalText + planWarning }],
         };
       }
 
@@ -1434,6 +1473,58 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
         return {
           content: [{ type: 'text', text: a2aClient.extractText(response) }],
+        };
+      }
+
+      case 'sync_plan': {
+        const { plan, task_id: explicitTaskId } = args as { plan: string; task_id?: string };
+        const targetTaskId = explicitTaskId || currentTaskId;
+
+        if (!targetTaskId) {
+          return {
+            content: [
+              { type: 'text', text: 'No task is currently claimed. Either claim a task first or provide a task_id.' },
+            ],
+            isError: true,
+          };
+        }
+
+        // Use the same approach as add_working_note but with plan defaults
+        const shortNote = plan.length > 200 ? plan.substring(0, 200) + '...' : plan;
+        const syncMessage = `Add informational plan note to task ${targetTaskId}: ${shortNote}`;
+
+        const syncResponse = await a2aClient.sendMessage(syncMessage, undefined, {
+          taskId: targetTaskId,
+          noteText: plan,
+          noteType: 'plan',
+          notePriority: 'informational',
+        });
+
+        if (a2aClient.hasError(syncResponse)) {
+          return {
+            content: [
+              { type: 'text', text: a2aClient.getErrorMessage(syncResponse) },
+            ],
+            isError: true,
+          };
+        }
+
+        // Also post a progress activity
+        if (currentProjectId) {
+          try {
+            await activityClient.postActivity({
+              projectId: currentProjectId,
+              taskId: targetTaskId,
+              eventType: 'progress',
+              message: 'Implementation plan synced to task',
+            });
+          } catch (activityError) {
+            console.error('[sync_plan] Failed to post activity (non-fatal):', activityError);
+          }
+        }
+
+        return {
+          content: [{ type: 'text', text: `Plan synced to task ${targetTaskId}. Previous plan notes (if any) were auto-resolved.` }],
         };
       }
 

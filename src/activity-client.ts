@@ -248,4 +248,16 @@ export class ActivityClient {
 
     return response.data.items;
   }
+
+  /**
+   * Get working notes for a task
+   */
+  async getTaskNotes(taskId: string): Promise<Array<{ id: string; type: string; status: string; note: string }>> {
+    try {
+      const response = await this.client.get(`/tasks/${taskId}/working-notes`);
+      return response.data;
+    } catch {
+      return [];
+    }
+  }
 }
