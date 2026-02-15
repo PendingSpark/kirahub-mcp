@@ -428,7 +428,7 @@ const tools: Tool[] = [
   {
     name: 'add_working_note',
     description:
-      'Add a working note to a task (todo, bug, edge case, or optimization)',
+      'Add a working note to a task (todo, bug, edge case, optimization, plan, or information). Plan notes auto-resolve previous plans. Priority defaults to informational for plan/information types.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -442,16 +442,16 @@ const tools: Tool[] = [
         },
         type: {
           type: 'string',
-          enum: ['todo', 'bug', 'edge_case', 'optimization'],
+          enum: ['todo', 'bug', 'edge_case', 'optimization', 'plan', 'information'],
           description: 'Type of note',
         },
         priority: {
           type: 'string',
-          enum: ['must_fix', 'should_fix', 'nice_to_have'],
-          description: 'Priority level',
+          enum: ['must_fix', 'should_fix', 'nice_to_have', 'informational'],
+          description: 'Priority level (defaults to informational for plan/information types)',
         },
       },
-      required: ['task_id', 'note', 'type', 'priority'],
+      required: ['task_id', 'note', 'type'],
     },
   },
   {
@@ -1411,9 +1411,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case 'add_working_note': {
         const { task_id, note, type, priority } = args as any;
-        const message = `Add ${priority} ${type} note to task ${task_id}: ${note}`;
+        const effectivePriority = priority || (type === 'plan' || type === 'information' ? 'informational' : 'should_fix');
+        // For plan/information notes, keep NLP text short and pass full content via structured entities
+        const shortNote = note.length > 200 ? note.substring(0, 200) + '...' : note;
+        const message = `Add ${effectivePriority} ${type} note to task ${task_id}: ${shortNote}`;
 
-        const response = await a2aClient.sendMessage(message);
+        const response = await a2aClient.sendMessage(message, undefined, {
+          taskId: task_id,
+          noteText: note,
+          noteType: type,
+          notePriority: effectivePriority,
+        });
 
         if (a2aClient.hasError(response)) {
           return {
