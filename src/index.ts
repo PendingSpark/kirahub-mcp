@@ -1089,7 +1089,8 @@ When you create or modify shared interfaces, utilities, or make architectural de
           console.error('[complete_task] Processing context cleanup response');
           const cleanupResult = await processContextCleanup(message, pendingContextCleanup);
           pendingContextCleanup = null;
-          currentTaskId = null;
+          // Don't clear currentTaskId here — the agent may still post activities
+          // (e.g., a descriptive "completed" summary). It resets on next claim_task.
           return {
             content: [{ type: 'text', text: cleanupResult }],
           };
@@ -1191,8 +1192,8 @@ When you create or modify shared interfaces, utilities, or make architectural de
               };
             }
 
-            // No context to clean up, clear task context
-            currentTaskId = null;
+            // Don't clear currentTaskId — the agent may still post activities after completion.
+            // It resets on next claim_task.
           }
 
           return {
@@ -1232,8 +1233,8 @@ When you create or modify shared interfaces, utilities, or make architectural de
             };
           }
 
-          // No context to clean up, clear task context
-          currentTaskId = null;
+          // Don't clear currentTaskId — the agent may still post activities after completion.
+          // It resets on next claim_task.
         }
 
         return {
