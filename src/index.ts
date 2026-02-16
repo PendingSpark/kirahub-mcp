@@ -627,7 +627,14 @@ const tools: Tool[] = [
   {
     name: 'post_activity',
     description:
-      'Post an activity event to track what the agent is doing. Use this to log progress, decisions, file changes, etc.',
+      'Post an activity event to track what the agent is doing. You MUST call this proactively throughout your work — do not wait to be asked. Specifically:\n' +
+      '- Post `progress` after completing each significant milestone (e.g., "Database schema done, moving to API endpoints")\n' +
+      '- Post `file_created` or `file_modified` when you create or change key files\n' +
+      '- Post `decision` when you make architectural or technical choices (include rationale)\n' +
+      '- Post `commit` after git commits, `pr_created` after creating PRs\n' +
+      '- Post `blocked` if you cannot proceed, `error` if something goes wrong\n' +
+      '- Post `warning` for things other agents or the team should know about\n' +
+      'The project_id and task_id are auto-filled from the currently claimed task if omitted.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -743,7 +750,12 @@ const tools: Tool[] = [
   {
     name: 'set_shared_context',
     description:
-      'Set a shared context item (e.g., document a contract, utility, decision, or config)',
+      'Set a shared context item so other agents can see your work. You SHOULD call this when:\n' +
+      '- You create or modify a shared interface/type → category: "contracts"\n' +
+      '- You create a reusable utility function → category: "utilities"\n' +
+      '- You make a technical/architectural decision → category: "decisions" (include rationale)\n' +
+      '- You add or change environment variables or config → category: "config"\n' +
+      'This enables parallel agents to stay coordinated without reading each other\'s code.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1034,7 +1046,32 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           }
         }
 
-        const workflowReminder = '\n\n---\n## Workflow\n- After exiting plan mode, call `sync_plan` with your plan content to share it with the team.\n- Use `add_working_note` with `type: "information"` for progress updates during implementation.';
+        const workflowReminder = `\n\n---
+## Agent Workflow Guide
+
+### Activity Tracking (IMPORTANT)
+You MUST post activity updates proactively throughout your work using \`post_activity\`. Do not wait to be asked.
+
+**When to post:**
+| Moment | event_type | Example message |
+|--------|-----------|-----------------|
+| Starting implementation | \`progress\` | "Beginning database schema design" |
+| Completing a milestone | \`progress\` | "API endpoints done, moving to tests" |
+| Creating/modifying files | \`file_created\` / \`file_modified\` | "Created src/api/users.ts" |
+| Making a technical choice | \`decision\` | "Using JSONB for flexible schema - avoids migrations" |
+| After git commit | \`commit\` | "Committed user preferences feature (abc123)" |
+| After creating a PR | \`pr_created\` | "Created PR #42 for user preferences" |
+| Encountering a blocker | \`blocked\` | "Waiting for auth middleware from other agent" |
+| Something goes wrong | \`error\` | "Migration failed - foreign key constraint" |
+| Team should know something | \`warning\` | "API rate limit approaching, consider caching" |
+
+### Shared Context
+When you create or modify shared interfaces, utilities, or make architectural decisions, call \`set_shared_context\` so other agents stay coordinated.
+
+### Plan Syncing
+- After exiting plan mode, call \`sync_plan\` with your plan content to share it with the team.
+- Use \`add_working_note\` with \`type: "information"\` for progress updates during implementation.`;
+
 
         return {
           content: [{ type: 'text', text: responseText + contextBundle + workflowReminder }],
