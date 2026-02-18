@@ -26,6 +26,9 @@ const KIRAHUB_PROJECT_ID = process.env.KIRAHUB_PROJECT_ID || null;
 let currentTaskId: string | null = null;
 let currentProjectId: string | null = null;
 
+// Track whether the agent has synced their implementation plan for the current task
+let planSynced: boolean = false;
+
 // Track context cleanup state
 let pendingContextCleanup: {
   items: Array<{ category: string; key: string; value: any }>;
@@ -966,14 +969,21 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           };
         }
 
-        // Extract task data from response to get the actual UUID
+        // Extract task data from response to get the actual UUID and conflict warnings
         const taskData = a2aClient.extractTaskData(response);
         const taskUuid = taskData?.id || task_id;
         const projectId = taskData?.project_id || null;
 
+        // Extract full data part for conflict warnings (not included in extractTaskData)
+        const fullDataPart = response.result?.parts?.find(
+          (p: any) => p.kind === 'data' && p.data?.kind === 'task'
+        );
+        const taskDataFull = fullDataPart?.data || {};
+
         // Store current task UUID for automatic activity tracking
         currentTaskId = taskUuid;
         currentProjectId = projectId;
+        planSynced = false;
 
         // Try to extract project ID from the response and auto-post activity
         const responseText = a2aClient.extractText(response);
@@ -991,6 +1001,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           }
         } catch (activityError) {
           console.error('[claim_task] Failed to auto-post activity (non-fatal):', activityError);
+        }
+
+        // Render conflict warnings if present in the response data
+        let conflictSection = '';
+        const conflictWarnings = taskDataFull?.conflictWarnings;
+        if (Array.isArray(conflictWarnings) && conflictWarnings.length > 0) {
+          const severityIcon: Record<string, string> = { high: '!!!', medium: '!!', low: '!' };
+          const warningLines = conflictWarnings.map((w: any) => {
+            const icon = severityIcon[w.severity] || '!';
+            return `- **[${icon} ${w.severity.toUpperCase()}] ${w.conflictType}** with ${w.otherTaskReadableId}\n  ${w.description}\n  *Recommendation: ${w.recommendation}*`;
+          });
+          conflictSection = `\n\n---\n## Potential Conflicts\n\n${conflictWarnings.length} potential conflict(s) detected with other active agents:\n\n${warningLines.join('\n\n')}`;
         }
 
         // Fetch project context bundle (knowledge + shared context)
@@ -1074,7 +1096,7 @@ When you create or modify shared interfaces, utilities, or make architectural de
 
 
         return {
-          content: [{ type: 'text', text: responseText + contextBundle + workflowReminder }],
+          content: [{ type: 'text', text: responseText + conflictSection + contextBundle + workflowReminder }],
         };
       }
 
@@ -1561,6 +1583,8 @@ When you create or modify shared interfaces, utilities, or make architectural de
           };
         }
 
+        planSynced = true;
+
         // Also post a progress activity
         if (currentProjectId) {
           try {
@@ -1781,11 +1805,18 @@ When you create or modify shared interfaces, utilities, or make architectural de
             metadata,
           });
 
+          let responseText = `Activity posted: [${activity.eventType}] ${activity.message}\nID: ${activity.id}`;
+
+          // Remind agent to sync plan if they haven't yet
+          if (event_type === 'progress' && !planSynced && currentTaskId) {
+            responseText += '\n\nReminder: You haven\'t synced your implementation plan yet. If you\'ve completed planning, call sync_plan with your plan content.';
+          }
+
           return {
             content: [
               {
                 type: 'text',
-                text: `Activity posted: [${activity.eventType}] ${activity.message}\nID: ${activity.id}`,
+                text: responseText,
               },
             ],
           };
