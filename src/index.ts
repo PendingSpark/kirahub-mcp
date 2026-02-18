@@ -1114,22 +1114,36 @@ When you create or modify shared interfaces, utilities, or make architectural de
 
         // Build the request message based on what parameters are provided
         let requestMessage: string;
+        let structuredEntities: Record<string, any> | undefined;
+
         if (task_id && message) {
-          // Completing a task with a completion message
+          // Completing a task with a completion message — pass it as structured entity
           requestMessage = `Mark task ${task_id} as completed with message: ${message}`;
+          structuredEntities = {
+            taskId: task_id,
+            status: 'completed',
+            completionMessage: message,
+          };
         } else if (message && !task_id) {
           // Answering a validation question (no task_id means we're in validation flow)
           requestMessage = message;
         } else if (task_id && !message) {
           // Completing a task without a message
           requestMessage = `Mark task ${task_id} as completed`;
+          structuredEntities = {
+            taskId: task_id,
+            status: 'completed',
+          };
         } else {
           // No parameters - complete current task
           requestMessage = 'Mark current task as completed';
+          structuredEntities = {
+            status: 'completed',
+          };
         }
 
         console.error(`[complete_task] Sending request: ${requestMessage}`);
-        const response = await a2aClient.sendMessage(requestMessage);
+        const response = await a2aClient.sendMessage(requestMessage, undefined, structuredEntities);
 
         // Log full response structure for debugging
         console.error('[complete_task] Full A2A response:', JSON.stringify(response, null, 2));
